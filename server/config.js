@@ -6,7 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const config = {
   root,
   port: Number(process.env.PORT || 3001),
-  isProd: process.env.NODE_ENV === 'production',
+  isProd: process.env.NODE_ENV === 'production' || process.argv.includes('--production'),
   dbPath: process.env.DATABASE_PATH || path.join(root, 'data', 'descogef.db'),
   sessionDays: Number(process.env.SESSION_DAYS || 30),
   adminEmail: process.env.ADMIN_EMAIL || 'admin@descogef.local',

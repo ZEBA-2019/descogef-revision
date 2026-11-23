@@ -51,8 +51,13 @@ npm run build
 ```
 
 ```bash
-ADMIN_PASSWORD='un-mot-de-passe-solide' npm start
+npm start
 ```
+
+Pour définir le mot de passe administrateur initial avant le premier lancement :
+- Windows (invite de commandes) : `set ADMIN_PASSWORD=un-mot-de-passe-solide` puis `npm start`
+- Windows (PowerShell) : `$env:ADMIN_PASSWORD="un-mot-de-passe-solide"` puis `npm start`
+- macOS / Linux : `ADMIN_PASSWORD='un-mot-de-passe-solide' npm start`
 
 L’application complète (API + interface compilée) est alors servie sur http://localhost:3001.
 
@@ -70,7 +75,7 @@ Variables d’environnement (voir `.env.example`) :
 | `ADMIN_PASSWORD` | `ChangezMoi-2026!` | Mot de passe initial — à définir en production |
 | `SESSION_DAYS` | `30` | Durée des sessions |
 | `APP_ORIGIN` | — | Origine supplémentaire autorisée pour les requêtes modifiantes |
-| `NODE_ENV` | — | `production` active le cookie `Secure` et la CSP |
+| `NODE_ENV` | — | `production` (ou `npm start`, qui passe `--production`) active le cookie `Secure` et la CSP |
 
 En production, placez l’application derrière un proxy HTTPS (le cookie de session est alors `Secure`).
 

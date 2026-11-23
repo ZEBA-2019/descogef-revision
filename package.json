@@ -12,7 +12,7 @@
     "dev:server": "node --watch --disable-warning=ExperimentalWarning server/index.js",
     "dev:client": "vite",
     "build": "vite build",
-    "start": "NODE_ENV=production node --disable-warning=ExperimentalWarning server/index.js",
+    "start": "node --disable-warning=ExperimentalWarning server/index.js --production",
     "seed": "node --disable-warning=ExperimentalWarning server/seed.js",
     "seed:reset": "node --disable-warning=ExperimentalWarning server/seed.js --reset",
     "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.js"

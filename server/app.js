@@ -10,6 +10,24 @@ import contentRoutes from './routes/content.js';
 import planningRoutes from './routes/planning.js';
 import adminRoutes from './routes/admin.js';
 
+/**
+ * Une requête modifiante est acceptée si son origine correspond à l'hôte servi
+ * (directement ou via un proxy), à APP_ORIGIN, ou — hors production — à localhost
+ * (serveur de développement Vite sur un autre port).
+ */
+export function isAllowedOrigin(origin, req) {
+  let url;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  const hosts = [req.headers.host, req.headers['x-forwarded-host']].filter(Boolean);
+  if (hosts.includes(url.host)) return true;
+  if (config.allowedOrigin && origin === config.allowedOrigin) return true;
+  return !config.isProd && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+}
+
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
@@ -33,11 +51,7 @@ export function createApp() {
   app.use('/api', (req, _res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
     const origin = req.headers.origin;
-    if (origin) {
-      const host = req.headers['x-forwarded-host'] || req.headers.host;
-      const allowed = config.allowedOrigin ? [config.allowedOrigin] : [];
-      if (new URL(origin).host !== host && !allowed.includes(origin)) return next(new HttpError(403, 'Origine de la requête non autorisée.'));
-    }
+    if (origin && !isAllowedOrigin(origin, req)) return next(new HttpError(403, 'Origine de la requête non autorisée.'));
     next();
   });
 

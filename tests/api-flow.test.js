@@ -229,3 +229,14 @@ test('examen blanc, flashcards, planning et cas pratique', async () => {
   assert.equal(ok.status, 201);
   assert.equal(ok.body.percent, 50);
 });
+
+test('protection CSRF : origine étrangère refusée, serveur de développement accepté', async () => {
+  const send = (origin) =>
+    fetch(base + '/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: origin },
+      body: JSON.stringify({ name: 'Origine', email: `o${Math.random()}@example.com`, password: 'Revision2026' }),
+    });
+  assert.equal((await send('https://site-malveillant.example')).status, 403);
+  assert.equal((await send('http://localhost:5173')).status, 201);
+});

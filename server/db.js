@@ -37,12 +37,29 @@ async function createDriver() {
     const pg = (await import('pg')).default;
     pg.types.setTypeParser(20, (v) => Number(v)); // int8 (COUNT, SUM…) -> number
     pg.types.setTypeParser(1700, (v) => Number(v)); // numeric -> number
-    const pool = new pg.Pool({
-      connectionString: config.databaseUrl,
-      max: 5,
-      idleTimeoutMillis: 10_000,
-      ssl: /localhost|127\.0\.0\.1/.test(config.databaseUrl) ? false : { rejectUnauthorized: false },
-    });
+    const schema = config.databaseSchema;
+    if (schema && !/^[a-z_][a-z0-9_]*$/.test(schema)) throw new Error('DATABASE_SCHEMA invalide.');
+    const makePool = (url) => {
+      const p = new pg.Pool({
+        connectionString: url,
+        max: 5,
+        idleTimeoutMillis: 10_000,
+        connectionTimeoutMillis: 10_000,
+        ssl: /localhost|127\.0\.0\.1/.test(url) ? false : { rejectUnauthorized: false },
+      });
+      if (schema) p.on('connect', (client) => client.query(`SET search_path TO ${schema}`));
+      return p;
+    };
+    let pool = makePool(config.databaseUrl);
+    try {
+      await pool.query('SELECT 1');
+    } catch (e) {
+      if (!config.databaseUrlFallback) throw e;
+      console.warn(`Connexion principale impossible (${e.code || e.message}) : essai de l'adresse de secours.`);
+      await pool.end().catch(() => {});
+      pool = makePool(config.databaseUrlFallback);
+      await pool.query('SELECT 1');
+    }
     return {
       query: (sql, params) => pool.query(sql, params),
       async transaction(fn) {

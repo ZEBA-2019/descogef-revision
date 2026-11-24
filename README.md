@@ -73,6 +73,8 @@ Variables d’environnement (voir `.env.example`) :
 |---|---|---|
 | `PORT` | `3001` | Port HTTP |
 | `DATABASE_URL` | — | Chaîne de connexion Postgres (Neon). Si absente : PGlite local |
+| `DATABASE_URL_FALLBACK` | — | Adresse Postgres de secours, essayée si `DATABASE_URL` est injoignable |
+| `DATABASE_SCHEMA` | — | Schéma Postgres dédié (ex. `descogef` sur Supabase) |
 | `DATABASE_PATH` | `./data/pglite` | Dossier PGlite local (`:memory:` pour les tests) |
 | `ADMIN_EMAIL` | `admin@descogef.local` | Compte administrateur initial |
 | `ADMIN_PASSWORD` | `ChangezMoi-2026!` | Mot de passe initial — à définir en production |

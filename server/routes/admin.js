@@ -165,16 +165,16 @@ function entity(name) {
   return e;
 }
 
-function serialize(e, row) {
+async function serialize(e, row) {
   const out = { ...row };
   for (const f of e.json || []) out[f] = parseJson(row[f], null);
-  if (e.table === 'questions') out.choices = all('SELECT id, label, is_correct, feedback FROM choices WHERE question_id = ? ORDER BY position, id', row.id);
+  if (e.table === 'questions') out.choices = await all('SELECT id, label, is_correct, feedback FROM choices WHERE question_id = ? ORDER BY position, id', row.id);
   return out;
 }
 
-function checkParent(e, data) {
-  if (e.parent === 'subject_id' && !one('SELECT id FROM subjects WHERE id = ?', data.subject_id)) throw new HttpError(400, 'Matière introuvable.');
-  if (e.parent === 'chapter_id' && !one('SELECT id FROM chapters WHERE id = ?', data.chapter_id)) throw new HttpError(400, 'Chapitre introuvable.');
+async function checkParent(e, data) {
+  if (e.parent === 'subject_id' && !await one('SELECT id FROM subjects WHERE id = ?', data.subject_id)) throw new HttpError(400, 'Matière introuvable.');
+  if (e.parent === 'chapter_id' && !await one('SELECT id FROM chapters WHERE id = ?', data.chapter_id)) throw new HttpError(400, 'Chapitre introuvable.');
 }
 
 function toRow(e, data) {
@@ -185,90 +185,95 @@ function toRow(e, data) {
   return row;
 }
 
-function saveChoices(questionId, choices) {
-  run('DELETE FROM choices WHERE question_id = ?', questionId);
-  choices.forEach((c, i) => run('INSERT INTO choices (question_id, label, is_correct, feedback, position) VALUES (?, ?, ?, ?, ?)', questionId, c.label, c.is_correct ? 1 : 0, c.feedback, i));
+async function saveChoices(questionId, choices) {
+  await run('DELETE FROM choices WHERE question_id = ?', questionId);
+  for (const [i, c] of choices.entries()) {
+    await run('INSERT INTO choices (question_id, label, is_correct, feedback, position) VALUES (?, ?, ?, ?, ?)', questionId, c.label, c.is_correct ? 1 : 0, c.feedback, i);
+  }
 }
 
-router.get('/overview', handler((_req, res) => {
+router.get('/overview', handler(async (_req, res) => {
   const counts = {};
-  for (const [k, e] of Object.entries(ENTITIES)) counts[k] = one(`SELECT COUNT(*) AS n FROM ${e.table}`).n;
-  counts.users = one('SELECT COUNT(*) AS n FROM users').n;
-  counts.demo = Object.values(ENTITIES).reduce((s, e) => s + one(`SELECT COUNT(*) AS n FROM ${e.table} WHERE is_demo = 1`).n, 0);
+  for (const [k, e] of Object.entries(ENTITIES)) counts[k] = (await one(`SELECT COUNT(*) AS n FROM ${e.table}`)).n;
+  counts.users = (await one('SELECT COUNT(*) AS n FROM users')).n;
+  counts.demo = 0;
+  for (const e of Object.values(ENTITIES)) counts.demo += (await one(`SELECT COUNT(*) AS n FROM ${e.table} WHERE is_demo = 1`)).n;
   res.json({ counts, entities: Object.fromEntries(Object.entries(ENTITIES).map(([k, e]) => [k, { label: e.label, parent: e.parent || null }])) });
 }));
 
-router.get('/:entity', handler((req, res) => {
+router.get('/:entity', handler(async (req, res) => {
   const e = entity(req.params.entity);
   const where = [];
   const params = [];
   if (e.parent && req.query.parent) { where.push(`${e.parent} = ?`); params.push(toId(req.query.parent)); }
-  const rows = all(`SELECT * FROM ${e.table} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${e.order}`, ...params);
-  res.json({ items: rows.map((r) => serialize(e, r)) });
+  const rows = await all(`SELECT * FROM ${e.table} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${e.order}`, ...params);
+  res.json({ items: await Promise.all(rows.map((r) => serialize(e, r))) });
 }));
 
-router.get('/:entity/:id', handler((req, res) => {
+router.get('/:entity/:id', handler(async (req, res) => {
   const e = entity(req.params.entity);
-  const row = one(`SELECT * FROM ${e.table} WHERE id = ?`, toId(req.params.id));
+  const row = await one(`SELECT * FROM ${e.table} WHERE id = ?`, toId(req.params.id));
   if (!row) throw new HttpError(404, `${e.label} introuvable.`);
-  res.json({ item: serialize(e, row) });
+  res.json({ item: await serialize(e, row) });
 }));
 
-router.post('/:entity', handler((req, res) => {
+router.post('/:entity', handler(async (req, res) => {
   const e = entity(req.params.entity);
   const data = validate(e.schema, req.body);
-  checkParent(e, data);
-  const id = tx(() => {
+  await checkParent(e, data);
+  const id = await tx(async () => {
     const row = toRow(e, data);
     if (e.table !== 'exams') {
       const parentClause = e.parent ? `WHERE ${e.parent} = ?` : '';
-      row.position = (one(`SELECT COALESCE(MAX(position), -1) + 1 AS p FROM ${e.table} ${parentClause}`, ...(e.parent ? [data[e.parent]] : [])).p);
+      row.position = (await one(`SELECT COALESCE(MAX(position), -1) + 1 AS p FROM ${e.table} ${parentClause}`, ...(e.parent ? [data[e.parent]] : []))).p;
     }
     const cols = Object.keys(row);
-    const { lastInsertRowid } = run(`INSERT INTO ${e.table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, ...cols.map((c) => row[c]));
-    if (e.table === 'questions') saveChoices(Number(lastInsertRowid), data.choices);
+    const { lastInsertRowid } = await run(`INSERT INTO ${e.table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) RETURNING id`, ...cols.map((c) => row[c]));
+    if (e.table === 'questions') await saveChoices(Number(lastInsertRowid), data.choices);
     return Number(lastInsertRowid);
   });
-  res.status(201).json({ item: serialize(e, one(`SELECT * FROM ${e.table} WHERE id = ?`, id)) });
+  res.status(201).json({ item: await serialize(e, await one(`SELECT * FROM ${e.table} WHERE id = ?`, id)) });
 }));
 
-router.put('/:entity/:id', handler((req, res) => {
+router.put('/:entity/:id', handler(async (req, res) => {
   const e = entity(req.params.entity);
   const id = toId(req.params.id);
-  if (!one(`SELECT id FROM ${e.table} WHERE id = ?`, id)) throw new HttpError(404, `${e.label} introuvable.`);
+  if (!await one(`SELECT id FROM ${e.table} WHERE id = ?`, id)) throw new HttpError(404, `${e.label} introuvable.`);
   const data = validate(e.schema, req.body);
-  checkParent(e, data);
-  tx(() => {
+  await checkParent(e, data);
+  await tx(async () => {
     const row = toRow(e, data);
     const cols = Object.keys(row);
-    run(`UPDATE ${e.table} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...cols.map((c) => row[c]), id);
-    if (e.table === 'questions') saveChoices(id, data.choices);
+    await run(`UPDATE ${e.table} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...cols.map((c) => row[c]), id);
+    if (e.table === 'questions') await saveChoices(id, data.choices);
   });
-  res.json({ item: serialize(e, one(`SELECT * FROM ${e.table} WHERE id = ?`, id)) });
+  res.json({ item: await serialize(e, await one(`SELECT * FROM ${e.table} WHERE id = ?`, id)) });
 }));
 
-router.delete('/:entity/:id', handler((req, res) => {
+router.delete('/:entity/:id', handler(async (req, res) => {
   const e = entity(req.params.entity);
   const id = toId(req.params.id);
-  const { changes } = run(`DELETE FROM ${e.table} WHERE id = ?`, id);
+  const { changes } = await run(`DELETE FROM ${e.table} WHERE id = ?`, id);
   if (!changes) throw new HttpError(404, `${e.label} introuvable.`);
   res.json({ ok: true });
 }));
 
 /** Classement : déplace un élément d'un cran vers le haut ou le bas parmi ses frères. */
-router.post('/:entity/:id/move', handler((req, res) => {
+router.post('/:entity/:id/move', handler(async (req, res) => {
   const e = entity(req.params.entity);
   if (e.table === 'exams') throw new HttpError(400, 'Les examens ne sont pas classables.');
   const id = toId(req.params.id);
   const { direction } = validate(z.object({ direction: z.enum(['up', 'down']) }), req.body);
-  const row = one(`SELECT * FROM ${e.table} WHERE id = ?`, id);
+  const row = await one(`SELECT * FROM ${e.table} WHERE id = ?`, id);
   if (!row) throw new HttpError(404, `${e.label} introuvable.`);
-  const siblings = all(`SELECT id FROM ${e.table} ${e.parent ? `WHERE ${e.parent} = ?` : ''} ORDER BY position, id`, ...(e.parent ? [row[e.parent]] : [])).map((r) => r.id);
+  const siblings = (await all(`SELECT id FROM ${e.table} ${e.parent ? `WHERE ${e.parent} = ?` : ''} ORDER BY position, id`, ...(e.parent ? [row[e.parent]] : []))).map((r) => r.id);
   const i = siblings.indexOf(id);
   const j = direction === 'up' ? i - 1 : i + 1;
   if (j >= 0 && j < siblings.length) {
     [siblings[i], siblings[j]] = [siblings[j], siblings[i]];
-    tx(() => siblings.forEach((sid, pos) => run(`UPDATE ${e.table} SET position = ? WHERE id = ?`, pos, sid)));
+    await tx(async () => {
+      for (const [pos, sid] of siblings.entries()) await run(`UPDATE ${e.table} SET position = ? WHERE id = ?`, pos, sid);
+    });
   }
   res.json({ order: siblings });
 }));

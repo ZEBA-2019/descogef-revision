@@ -9,8 +9,8 @@ import assert from 'node:assert/strict';
 process.env.DATABASE_PATH = ':memory:';
 process.env.ADMIN_PASSWORD = 'AdminTest123';
 
-const { getDb, closeDb } = await import('../server/db.js');
-const { seedContent, ensureAdmin } = await import('../server/seed.js');
+const { closeDb, run } = await import('../server/db.js');
+const { initDatabase } = await import('../server/seed.js');
 const { createApp } = await import('../server/app.js');
 const { loadQuestions } = await import('../server/services.js');
 const { gradeAnswer } = await import('../shared/scoring.js');
@@ -19,16 +19,14 @@ let server;
 let base;
 
 before(async () => {
-  getDb();
-  seedContent();
-  ensureAdmin();
+  await initDatabase();
   server = createApp().listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api`;
 });
-after(() => {
+after(async () => {
   server?.close();
-  closeDb();
+  await closeDb();
 });
 
 function client() {
@@ -86,7 +84,7 @@ test('parcours complet : inscription → diagnostic → quiz → progression', a
     assert.equal('answer' in q, false);
     assert.equal('explanation' in q, false);
   }
-  const full = loadQuestions(diagQs.map((q) => q.id));
+  const full = await loadQuestions(diagQs.map((q) => q.id));
   // Réponses correctes aux questions de la 1re matière, fausses ailleurs
   const firstSubject = diagQs[0].subjectId;
   for (const q of full) {
@@ -121,7 +119,7 @@ test('parcours complet : inscription → diagnostic → quiz → progression', a
   const quiz = await api('POST', '/quiz/start', { mode: 'personnalise', subjectId: other.subjectId, count: 10 });
   assert.equal(quiz.status, 201);
   assert.equal(quiz.body.attempt.questions.length, 10);
-  for (const q of loadQuestions(quiz.body.attempt.questions.map((x) => x.id))) {
+  for (const q of await loadQuestions(quiz.body.attempt.questions.map((x) => x.id))) {
     const r = await api('POST', `/attempts/${quiz.body.attempt.id}/answer`, { questionId: q.id, answer: correctAnswerFor(q), timeSec: 30 });
     assert.equal(r.body.correction.correct, true, `question ${q.id} (${q.type}) devrait être juste`);
   }
@@ -171,7 +169,6 @@ test('sécurité : accès non authentifié et administration', async () => {
 test('examen blanc, flashcards, planning et cas pratique', async () => {
   const api = client();
   await api('POST', '/auth/register', { name: 'Fatou', email: 'fatou@example.com', password: 'Revision2026' });
-  const { run } = await import('../server/db.js');
 
   // Examen blanc : sujet équilibré, sauvegarde automatique, remise automatique après le temps imparti
   const exams = await api('GET', '/exams');
@@ -180,7 +177,7 @@ test('examen blanc, flashcards, planning et cas pratique', async () => {
   const qs = start.body.attempt.questions;
   assert.equal(qs.length, 12);
   for (const sid of new Set(qs.map((q) => q.subjectId))) assert.equal(qs.filter((q) => q.subjectId === sid).length, 4);
-  const firstQ = loadQuestions([qs[0].id])[0];
+  const [firstQ] = await loadQuestions([qs[0].id]);
   const saved = await api('PUT', `/attempts/${start.body.attempt.id}/autosave`, { answers: { [firstQ.id]: correctAnswerFor(firstQ) }, currentIndex: 1 });
   assert.equal(saved.status, 200);
   const resumed = await api('POST', `/exams/${exams.body.exams[0].id}/start`);
@@ -188,7 +185,7 @@ test('examen blanc, flashcards, planning et cas pratique', async () => {
   assert.equal(resumed.body.attempt.state.currentIndex, 1);
   // On simule l'expiration du temps
   const a = start.body.attempt;
-  run("UPDATE attempts SET state = json_set(state, '$.deadline', '2000-01-01T00:00:00.000Z') WHERE id = ?", a.id);
+  await run(`UPDATE attempts SET state = jsonb_set(state::jsonb, '{deadline}', '"2000-01-01T00:00:00.000Z"')::text WHERE id = ?`, a.id);
   const after = await api('GET', `/attempts/${a.id}`);
   assert.equal(after.body.attempt.status, 'termine');
   const review = await api('GET', `/attempts/${a.id}/review`);
@@ -201,7 +198,7 @@ test('examen blanc, flashcards, planning et cas pratique', async () => {
   const [c1, c2] = q1.body.queue;
   await api('POST', `/flashcards/${c1.id}/review`, { grade: 0 });
   await api('POST', `/flashcards/${c2.id}/review`, { grade: 3 });
-  run("UPDATE flashcard_states SET due_at = '2000-01-01T00:00:00.000Z' WHERE flashcard_id = ? ", c1.id);
+  await run("UPDATE flashcard_states SET due_at = '2000-01-01T00:00:00.000Z' WHERE flashcard_id = ? ", c1.id);
   const q2 = await api('GET', '/flashcards/queue?limit=40');
   assert.equal(q2.body.queue[0].id, c1.id, 'la carte oubliée est prioritaire');
   assert.ok(!q2.body.queue.some((c) => c.id === c2.id));
@@ -214,7 +211,7 @@ test('examen blanc, flashcards, planning et cas pratique', async () => {
   const plan = await api('POST', '/planning', { examDate, availability, levels: {} });
   assert.equal(plan.status, 201);
   assert.ok(plan.body.created > 30);
-  run("UPDATE plan_items SET date = '2000-01-01' WHERE id = (SELECT MIN(id) FROM plan_items)");
+  await run("UPDATE plan_items SET date = '2000-01-01' WHERE id = (SELECT MIN(id) FROM plan_items)");
   const p = await api('GET', '/planning');
   assert.equal(p.body.rescheduled, 1);
   assert.equal(p.body.totals.missed, 1);

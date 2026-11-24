@@ -5,7 +5,7 @@
 | Besoin | Choix | Raison |
 |---|---|---|
 | Serveur | Node.js + Express | Simple, répandu, facile à héberger |
-| Base persistante | SQLite via `node:sqlite` (intégré à Node 22) | Aucune installation ni compilation ; un seul fichier à sauvegarder |
+| Base persistante | PostgreSQL : Neon en production, PGlite (Postgres embarqué) en local et en test | Même moteur partout ; rien à installer sur le poste ; compatible serverless |
 | Validation | zod | Schémas déclaratifs, messages en français |
 | Interface | React 18 + React Router + Vite | Pages découpées et chargées à la demande |
 | Logique métier | Modules purs dans `shared/` | Testables sans base ni serveur |

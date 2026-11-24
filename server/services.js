@@ -17,9 +17,9 @@ export function getChapters() {
 }
 
 /** Arborescence matières > chapitres avec compteurs de contenus. */
-export function getProgramTree() {
-  const subjects = getSubjects();
-  const chapters = all(`
+export async function getProgramTree() {
+  const subjects = await getSubjects();
+  const chapters = await all(`
     SELECT c.*,
       (SELECT COUNT(*) FROM sheets WHERE chapter_id = c.id) AS sheets_count,
       (SELECT COUNT(*) FROM questions WHERE chapter_id = c.id) AS questions_count,
@@ -31,16 +31,16 @@ export function getProgramTree() {
 }
 
 /** Questions complètes (avec réponses) – usage serveur uniquement. */
-export function loadQuestions(ids) {
+export async function loadQuestions(ids) {
   if (!ids.length) return [];
   const placeholders = ids.map(() => '?').join(',');
-  const qs = all(
+  const qs = await all(
     `SELECT q.*, c.subject_id, c.title AS chapter_title, s.title AS subject_title
      FROM questions q JOIN chapters c ON c.id = q.chapter_id JOIN subjects s ON s.id = c.subject_id
      WHERE q.id IN (${placeholders})`,
     ...ids
   );
-  const choices = all(`SELECT * FROM choices WHERE question_id IN (${placeholders}) ORDER BY position, id`, ...ids);
+  const choices = await all(`SELECT * FROM choices WHERE question_id IN (${placeholders}) ORDER BY position, id`, ...ids);
   const byId = new Map(
     qs.map((q) => [q.id, { ...q, answer: parseJson(q.answer, {}), choices: choices.filter((c) => c.question_id === q.id) }])
   );
@@ -91,8 +91,8 @@ export function correction(q, userAnswer) {
 
 /* ---------------------------- Résultats & temps ---------------------------- */
 
-export function recordResult({ attemptId, userId, question, answer, grade, timeSec }) {
-  run(
+export async function recordResult({ attemptId, userId, question, answer, grade, timeSec }) {
+  await run(
     `INSERT INTO results (attempt_id, user_id, question_id, item_index, subject_id, chapter_id, difficulty, competency, answer, is_correct, score, time_sec)
      VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
     attemptId, userId, question.id, question.subject_id, question.chapter_id, question.difficulty, question.competency,
@@ -100,47 +100,51 @@ export function recordResult({ attemptId, userId, question, answer, grade, timeS
   );
 }
 
-export function logStudy({ userId, activity, subjectId = null, chapterId = null, durationSec }) {
+export async function logStudy({ userId, activity, subjectId = null, chapterId = null, durationSec }) {
   const d = Math.round(Number(durationSec) || 0);
   if (d <= 0) return;
-  run('INSERT INTO study_sessions (user_id, activity, subject_id, chapter_id, duration_sec) VALUES (?, ?, ?, ?, ?)', userId, activity, subjectId, chapterId, Math.min(d, 6 * 3600));
+  await run('INSERT INTO study_sessions (user_id, activity, subject_id, chapter_id, duration_sec) VALUES (?, ?, ?, ?, ?)', userId, activity, subjectId, chapterId, Math.min(d, 6 * 3600));
 }
 
 /* ---------------------------- Progression ---------------------------- */
 
 /** Progression de l'utilisateur. `excludeAttemptId` permet de calculer l'état « avant » une série. */
-export function userProgress(userId, { excludeAttemptId = null } = {}) {
-  const subjects = getSubjects();
-  const chapters = getChapters();
-  const results = all(
-    `SELECT r.chapter_id, r.score, r.difficulty, r.created_at, r.competency
-     FROM results r WHERE r.user_id = ? AND r.question_id IS NOT NULL AND r.attempt_id IS NOT ?`,
-    userId, excludeAttemptId
-  );
-  const sheets = all(
+export async function userProgress(userId, { excludeAttemptId = null } = {}) {
+  const [subjects, chapters, results, sheets] = await Promise.all([
+    getSubjects(),
+    getChapters(),
+    all(
+      `SELECT r.chapter_id, r.score, r.difficulty, r.created_at, r.competency
+       FROM results r WHERE r.user_id = ? AND r.question_id IS NOT NULL AND r.attempt_id IS DISTINCT FROM ?::int`,
+      userId, excludeAttemptId
+    ),
+    all(
     `SELECT sh.id, sh.chapter_id, COALESCE(ss.status, 'a_decouvrir') AS status
-     FROM sheets sh LEFT JOIN sheet_status ss ON ss.sheet_id = sh.id AND ss.user_id = ?`,
-    userId
-  );
+       FROM sheets sh LEFT JOIN sheet_status ss ON ss.sheet_id = sh.id AND ss.user_id = ?`,
+      userId
+    ),
+  ]);
   return { ...computeProgress({ subjects, chapters, results, sheets }), results };
 }
 
-export function dueFlashcardsCount(userId) {
+export async function dueFlashcardsCount(userId) {
   const now = new Date().toISOString();
-  return one(
+  const row = await one(
     `SELECT COUNT(*) AS n FROM flashcards f
      JOIN flashcard_states st ON st.flashcard_id = f.id AND st.user_id = ?
      WHERE st.due_at <= ?`,
     userId, now
-  ).n;
+  );
+  return row.n;
 }
 
-export function newFlashcardsCount(userId) {
-  return one(
+export async function newFlashcardsCount(userId) {
+  const row = await one(
     `SELECT COUNT(*) AS n FROM flashcards f
      WHERE NOT EXISTS (SELECT 1 FROM flashcard_states st WHERE st.flashcard_id = f.id AND st.user_id = ?)`,
     userId
-  ).n;
+  );
+  return row.n;
 }
 
 export function planItemLabel(it) {
@@ -153,8 +157,8 @@ export function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function planItems(userId, from, to) {
-  return all(
+export async function planItems(userId, from, to) {
+  const rows = await all(
     `SELECT pi.*, c.title AS chapter_title, s.title AS subject_title, s.code AS subject_code
      FROM plan_items pi
      LEFT JOIN chapters c ON c.id = pi.chapter_id
@@ -162,11 +166,12 @@ export function planItems(userId, from, to) {
      WHERE pi.user_id = ? AND pi.date BETWEEN ? AND ?
      ORDER BY pi.date, pi.id`,
     userId, from, to
-  ).map((it) => ({ ...it, label: planItemLabel(it) }));
+  );
+  return rows.map((it) => ({ ...it, label: planItemLabel(it) }));
 }
 
 /** Données synthétiques communes au tableau de bord et aux statistiques. */
-export function buildRecommendation(user, progress) {
+export async function buildRecommendation(user, progress) {
   const today = todayISO();
   // Une seule réponse fausse suffit à signaler un chapitre fragile ; la priorité tient compte de la confiance
   const weak = weakChapters(progress.chapters, { minCount: 1 });
@@ -174,17 +179,17 @@ export function buildRecommendation(user, progress) {
   const examReady = isExamReady(progress);
   return recommendNext({
     diagnosticDone: Boolean(user.diagnostic_done),
-    dueFlashcards: dueFlashcardsCount(user.id),
+    dueFlashcards: await dueFlashcardsCount(user.id),
     weak,
     untouched,
-    todayPlan: planItems(user.id, today, today),
+    todayPlan: await planItems(user.id, today, today),
     examReady,
   });
 }
 
-export function dashboard(user) {
-  const progress = userProgress(user.id);
-  const time = one(
+export async function dashboard(user) {
+  const progress = await userProgress(user.id);
+  const time = await one(
     `SELECT COALESCE(SUM(duration_sec), 0) AS total,
             COALESCE(SUM(CASE WHEN created_at >= ? THEN duration_sec END), 0) AS week
      FROM study_sessions WHERE user_id = ?`,
@@ -192,18 +197,18 @@ export function dashboard(user) {
   );
   const answered = progress.results.length;
   const correct = progress.results.filter((r) => r.score >= 1).length;
-  const recent = all(
+  const recent = (await all(
     `SELECT a.id, a.kind, a.score, a.percent, a.finished_at, a.duration_sec, a.config,
             (SELECT COUNT(*) FROM results r WHERE r.attempt_id = a.id) AS answered
      FROM attempts a WHERE a.user_id = ? AND a.status = 'termine'
      ORDER BY a.finished_at DESC LIMIT 6`,
     user.id
-  ).map((a) => ({ ...a, config: parseJson(a.config, {}) }));
-  const activityDates = all(
+  )).map((a) => ({ ...a, config: parseJson(a.config, {}) }));
+  const activityDates = (await all(
     `SELECT DISTINCT substr(created_at, 1, 10) AS d FROM study_sessions WHERE user_id = ?
      UNION SELECT DISTINCT substr(created_at, 1, 10) FROM results WHERE user_id = ?`,
     user.id, user.id
-  ).map((r) => r.d);
+  )).map((r) => r.d);
   const today = todayISO();
   return {
     overall: progress.overall,
@@ -215,30 +220,31 @@ export function dashboard(user) {
     answered,
     streak: streakDays(activityDates),
     recent,
-    dueFlashcards: dueFlashcardsCount(user.id),
-    newFlashcards: newFlashcardsCount(user.id),
-    todayPlan: planItems(user.id, today, today),
-    recommendation: buildRecommendation(user, progress),
+    dueFlashcards: await dueFlashcardsCount(user.id),
+    newFlashcards: await newFlashcardsCount(user.id),
+    todayPlan: await planItems(user.id, today, today),
+    recommendation: await buildRecommendation(user, progress),
     examDate: user.exam_date,
   };
 }
 
-export function stats(user) {
-  const progress = userProgress(user.id);
-  const timeline = all(
+export async function stats(user) {
+  const progress = await userProgress(user.id);
+  const timeline = await all(
     `SELECT id, kind, percent, score, finished_at FROM attempts
      WHERE user_id = ? AND status = 'termine' AND percent IS NOT NULL ORDER BY finished_at`,
     user.id
   );
   const errors = recurringErrors(progress.results);
-  const missed = all(
+  const missed = await all(
     `SELECT q.id, q.prompt, c.title AS chapter_title,
             COUNT(*) AS attempts, SUM(CASE WHEN r.score < 1 THEN 1 ELSE 0 END) AS errors
      FROM results r JOIN questions q ON q.id = r.question_id JOIN chapters c ON c.id = q.chapter_id
-     WHERE r.user_id = ? GROUP BY q.id HAVING errors > 0 ORDER BY errors DESC, attempts DESC LIMIT 5`,
+     WHERE r.user_id = ? GROUP BY q.id, q.prompt, c.title
+     HAVING SUM(CASE WHEN r.score < 1 THEN 1 ELSE 0 END) > 0 ORDER BY errors DESC, attempts DESC LIMIT 5`,
     user.id
   );
-  const timeByActivity = all(
+  const timeByActivity = await all(
     'SELECT activity, SUM(duration_sec) AS seconds FROM study_sessions WHERE user_id = ? GROUP BY activity ORDER BY seconds DESC',
     user.id
   );
@@ -255,6 +261,6 @@ export function stats(user) {
     missed,
     timeByActivity,
     byDifficulty,
-    recommendation: buildRecommendation(user, progress),
+    recommendation: await buildRecommendation(user, progress),
   };
 }

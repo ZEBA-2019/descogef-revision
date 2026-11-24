@@ -26,8 +26,10 @@ Interface entièrement en français, responsive (ordinateur et téléphone), uti
 
 ## Prérequis
 
-- **Node.js 22.13 ou plus récent** (le module intégré `node:sqlite` est utilisé : aucune base externe ni compilation native n’est nécessaire).
-- npm 10+.
+- **Node.js 22 ou plus récent**, npm 10+.
+- Base de données **PostgreSQL** :
+  - en local et pour les tests : **rien à installer**, l’application utilise [PGlite](https://pglite.dev) (Postgres embarqué, stocké dans `data/pglite`) ;
+  - en production (Vercel) : **Neon** (Postgres serverless) via la variable `DATABASE_URL`.
 
 ## Installation et lancement
 
@@ -61,7 +63,7 @@ Pour définir le mot de passe administrateur initial avant le premier lancement 
 
 L’application complète (API + interface compilée) est alors servie sur http://localhost:3001.
 
-Au **premier lancement**, la base SQLite est créée (`data/descogef.db`), le contenu de démonstration est chargé et un compte administrateur est créé (`ADMIN_EMAIL` / `ADMIN_PASSWORD`). **Changez ce mot de passe** depuis « Profil et paramètres ».
+Au **premier lancement**, le schéma est créé, le contenu de démonstration est chargé et un compte administrateur est créé (`ADMIN_EMAIL` / `ADMIN_PASSWORD`). **Changez ce mot de passe** depuis « Profil et paramètres ».
 
 ### Configuration
 
@@ -70,7 +72,8 @@ Variables d’environnement (voir `.env.example`) :
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PORT` | `3001` | Port HTTP |
-| `DATABASE_PATH` | `./data/descogef.db` | Fichier SQLite (`:memory:` pour les tests) |
+| `DATABASE_URL` | — | Chaîne de connexion Postgres (Neon). Si absente : PGlite local |
+| `DATABASE_PATH` | `./data/pglite` | Dossier PGlite local (`:memory:` pour les tests) |
 | `ADMIN_EMAIL` | `admin@descogef.local` | Compte administrateur initial |
 | `ADMIN_PASSWORD` | `ChangezMoi-2026!` | Mot de passe initial — à définir en production |
 | `SESSION_DAYS` | `30` | Durée des sessions |
@@ -78,6 +81,19 @@ Variables d’environnement (voir `.env.example`) :
 | `NODE_ENV` | — | `production` (ou `npm start`, qui passe `--production`) active le cookie `Secure` et la CSP |
 
 En production, placez l’application derrière un proxy HTTPS (le cookie de session est alors `Secure`).
+
+## Déploiement sur Vercel
+
+L’interface est servie en statique (`dist/`) et l’API par une fonction Node (`api/index.js`, application Express) ; voir `vercel.json`.
+
+1. **Importer le dépôt** GitHub dans Vercel (vercel.com/new) : les réglages sont lus dans `vercel.json`.
+2. **Connecter une base Neon** : projet Vercel → onglet **Storage** → **Create Database** → **Neon** → connecter au projet (production, preview, development). La variable `DATABASE_URL` est ajoutée automatiquement.
+3. **Définir `ADMIN_PASSWORD`** (Settings → Environment Variables, type *Sensitive*) avant le premier appel : c’est le mot de passe du compte `admin@descogef.local`.
+4. **Redéployer** (Deployments → ⋯ → Redeploy).
+
+Au premier appel de l’API, le schéma, le contenu de démonstration et le compte administrateur sont créés automatiquement (un verrou évite les doublons si plusieurs instances démarrent ensemble). Sans `DATABASE_URL`, l’API répond « Base de données non configurée » plutôt que d’écrire sur le disque éphémère de Vercel.
+
+Pour travailler en local sur la base Neon : `vercel env pull .env.local`, puis exportez `DATABASE_URL` avant `npm run dev`.
 
 ### Tests
 
@@ -116,8 +132,8 @@ shared/            Logique métier pure, testée (aucune E/S)
 server/
   app.js           Application Express (sécurité, routes, interface compilée)
   index.js         Démarrage (initialisation de la base + contenu de démo)
-  db.js            Accès SQLite (node:sqlite), transactions
-  schema.sql       Schéma de la base
+  db.js            Accès PostgreSQL (pg en production, PGlite en local), transactions
+  schema.js        Schéma de la base (idempotent)
   auth.js          Hachage scrypt, sessions, contrôle d’accès, limitation de débit
   services.js      Requêtes et orchestration (progression, tableau de bord, statistiques)
   routes/          auth, quiz (quiz, diagnostic, examens), content (programme, fiches,
@@ -145,5 +161,4 @@ Le détail du modèle de données et des règles de calcul est dans [`docs/archi
 
 - Les cas pratiques sont corrigés par **autoévaluation** (pas de correction automatique de texte libre).
 - Pas de réinitialisation de mot de passe par e-mail (nécessiterait un service d’envoi).
-- SQLite convient à un établissement ou à quelques centaines d’utilisateurs ; pour davantage, migrer `server/db.js` vers PostgreSQL (le SQL est standard).
-- Le limiteur de débit est en mémoire (une seule instance).
+- Le limiteur de tentatives de connexion est en mémoire, donc propre à chaque instance serverless (protection partielle sur Vercel).

@@ -25,15 +25,15 @@ export function verifyPassword(password, stored) {
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 /** Crée une session ; seul le hachage du jeton est stocké en base. */
-export function createSession(userId) {
+export async function createSession(userId) {
   const token = crypto.randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + config.sessionDays * 86_400_000);
-  run('INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)', sha256(token), userId, expires.toISOString());
+  await run('INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)', sha256(token), userId, expires.toISOString());
   return { token, expires };
 }
 
-export function destroySession(token) {
-  if (token) run('DELETE FROM auth_sessions WHERE token_hash = ?', sha256(token));
+export async function destroySession(token) {
+  if (token) await run('DELETE FROM auth_sessions WHERE token_hash = ?', sha256(token));
 }
 
 export function setSessionCookie(res, token, expires) {
@@ -69,16 +69,21 @@ export const publicUser = (u) =>
   };
 
 /** Middleware : charge l'utilisateur à partir du cookie de session. */
-export function loadUser(req, _res, next) {
+export async function loadUser(req, _res, next) {
   const token = readCookie(req, COOKIE_NAME);
   req.sessionToken = token;
   if (token) {
-    const row = one(
+    let row;
+    try {
+      row = await one(
       `SELECT u.* FROM auth_sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.expires_at > ?`,
-      sha256(token),
-      new Date().toISOString()
-    );
+        sha256(token),
+        new Date().toISOString()
+      );
+    } catch (e) {
+      return next(e);
+    }
     if (row) req.user = row;
   }
   next();

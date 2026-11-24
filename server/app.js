@@ -4,6 +4,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { loadUser } from './auth.js';
 import { errorHandler, HttpError } from './http.js';
+import { initDatabase } from './seed.js';
 import authRoutes from './routes/auth.js';
 import quizRoutes from './routes/quiz.js';
 import contentRoutes from './routes/content.js';
@@ -55,6 +56,8 @@ export function createApp() {
     next();
   });
 
+  // Schéma + contenu de démonstration + administrateur : une seule fois par instance
+  app.use('/api', (_req, _res, next) => initDatabase().then(() => next(), next));
   app.use('/api', loadUser);
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.use('/api/auth', authRoutes);

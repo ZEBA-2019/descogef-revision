@@ -46,7 +46,7 @@ export function createApp() {
     next();
   });
 
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '4mb' }));
 
   // Protection CSRF : les requêtes modifiantes doivent provenir de la même origine
   app.use('/api', (req, _res, next) => {

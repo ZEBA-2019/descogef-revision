@@ -237,3 +237,54 @@ test('protection CSRF : origine étrangère refusée, serveur de développement 
   assert.equal((await send('https://site-malveillant.example')).status, 403);
   assert.equal((await send('http://localhost:5173')).status, 201);
 });
+
+test('import de contenu : vérification, erreurs, ajout et remplacement', async () => {
+  const fs = await import('node:fs');
+  const modele = JSON.parse(fs.readFileSync(new URL('../docs/modele-import.json', import.meta.url), 'utf8'));
+  const admin = client();
+  await admin('POST', '/auth/login', { email: 'admin@descogef.local', password: 'AdminTest123' });
+
+  // Réservé aux administrateurs
+  const student = client();
+  await student('POST', '/auth/register', { name: 'Ali', email: 'ali@example.com', password: 'Revision2026' });
+  assert.equal((await student('POST', '/admin/import', { mode: 'verifier', content: modele })).status, 403);
+
+  // Vérification seule : rien n'est importé
+  const before = (await admin('GET', '/admin/overview')).body.counts;
+  const check = await admin('POST', '/admin/import', { mode: 'verifier', content: modele });
+  assert.equal(check.status, 200);
+  assert.equal(check.body.imported, false);
+  assert.equal(check.body.summary.questions, 5);
+  assert.deepEqual((await admin('GET', '/admin/overview')).body.counts, before);
+
+  // Erreurs explicites : chapitre inconnu, QCM sans bonne réponse
+  const broken = structuredClone(modele);
+  broken.flashcards[0].chapter = 'inexistant';
+  broken.questions[0].choices.forEach((c) => (c.correct = false));
+  const bad = await admin('POST', '/admin/import', { mode: 'ajouter', content: broken });
+  assert.equal(bad.status, 400);
+  assert.ok(bad.body.errors.some((e) => e.includes('au moins une bonne réponse')));
+
+  // Ajout : la matière CF existante est complétée, pas dupliquée
+  const add = await admin('POST', '/admin/import', { mode: 'ajouter', content: modele });
+  assert.equal(add.status, 201);
+  const after = (await admin('GET', '/admin/overview')).body.counts;
+  assert.equal(after.subjects, before.subjects);
+  assert.equal(after.chapters, before.chapters + 1);
+  assert.equal(after.questions, before.questions + 5);
+
+  // Remplacement : confirmation obligatoire, puis seul le nouveau contenu subsiste
+  assert.equal((await admin('POST', '/admin/import', { mode: 'remplacer', content: modele })).status, 400);
+  const rep = await admin('POST', '/admin/import', { mode: 'remplacer', content: modele, confirm: 'REMPLACER' });
+  assert.equal(rep.status, 201);
+  const final = (await admin('GET', '/admin/overview')).body.counts;
+  assert.equal(final.subjects, 1);
+  assert.equal(final.questions, 5);
+  assert.equal(final.demo, 0);
+  // Le contenu importé est utilisable : programme et quiz
+  const prog = await student('GET', '/program');
+  assert.equal(prog.body.subjects[0].chapters[0].title, 'Immobilisations et amortissements');
+  const quiz = await student('POST', '/quiz/start', { count: 5 });
+  assert.equal(quiz.status, 201);
+  assert.equal(quiz.body.attempt.questions.length, 5);
+});

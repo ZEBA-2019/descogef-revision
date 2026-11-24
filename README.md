@@ -113,7 +113,9 @@ npm test
 
 ## Remplacer le contenu de démonstration
 
-Deux possibilités :
+**Le plus simple : l'import JSON.** Administration → onglet **Importer** : collez ou chargez un fichier JSON (vérification, puis ajout ou remplacement). Le format, un modèle et une consigne prête à coller dans **NotebookLM** pour générer ce fichier à partir de vos cours sont dans [`docs/import-format.md`](docs/import-format.md).
+
+Autres possibilités :
 
 1. **Par l’interface** : se connecter avec le compte administrateur → **Administration**. Modifier ou supprimer chaque élément et décocher « Contenu de démonstration » une fois validé. Un compteur rappelle le nombre d’éléments encore en démo.
 2. **Par fichier** : éditer `server/seed/demo-content.js` (même structure), puis :

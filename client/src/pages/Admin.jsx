@@ -47,7 +47,7 @@ export default function Admin() {
   const { data: subjects } = useFetch('/admin/subjects', [tab]);
   const { data: chapters } = useFetch('/admin/chapters', [tab]);
   const [parent, setParent] = useState('');
-  const listPath = `/admin/${tab}${parent && tab !== 'subjects' && tab !== 'exams' ? `?parent=${parent}` : ''}`;
+  const listPath = tab === 'import' ? null : `/admin/${tab}${parent && tab !== 'subjects' && tab !== 'exams' ? `?parent=${parent}` : ''}`;
   const { data, error, loading, reload } = useFetch(listPath);
   const [editing, setEditing] = useState(null);
   const [toast, showToast] = useToast();
@@ -105,9 +105,14 @@ export default function Admin() {
             {t.label}{overview ? ` (${overview.counts[t.key]})` : ''}
           </button>
         ))}
+        <button type="button" role="tab" aria-selected={tab === 'import'} aria-pressed={tab === 'import'} onClick={() => setTab('import')}>
+          ⬆ Importer
+        </button>
       </div>
 
-      {editing ? (
+      {tab === 'import' ? (
+        <ImportPanel onImported={() => { reloadOverview(); showToast('Import terminé'); }} />
+      ) : editing ? (
         <EntityForm
           entity={tab}
           initial={editing}
@@ -445,5 +450,109 @@ function QuestionFields({ f, setF, set, chapterOptions }) {
         <span>Utiliser dans le diagnostic initial</span>
       </label>
     </>
+  );
+}
+
+/* ------------------------------ Import JSON ------------------------------ */
+
+const SUMMARY_LABELS = {
+  matieres: 'Matières', chapitres: 'Chapitres', lecons: 'Leçons', fiches: 'Fiches', questions: 'Questions',
+  questionsDiagnostic: 'dont diagnostic', casPratiques: 'Cas pratiques', flashcards: 'Flashcards', examens: 'Examens blancs',
+};
+
+function ImportPanel({ onImported }) {
+  const [text, setText] = useState('');
+  const [mode, setMode] = useState('ajouter');
+  const [isDemo, setIsDemo] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  function parse() {
+    try {
+      return { content: JSON.parse(text.trim().replace(/^```(json)?|```$/g, '')) };
+    } catch (e) {
+      return { error: `JSON illisible : ${e.message}` };
+    }
+  }
+
+  async function submit(m) {
+    const { content, error } = parse();
+    if (error) return setResult({ ok: false, errors: [error] });
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await post('/admin/import', { mode: m, isDemo, content, confirm: confirmText });
+      setResult(r);
+      if (r.imported) {
+        onImported();
+        setConfirmText('');
+      }
+    } catch (e) {
+      setResult({ ok: false, errors: e.details?.length ? e.details.map((d) => d.message) : [e.message] });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadFile(file) {
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) return setResult({ ok: false, errors: ['Fichier trop volumineux (4 Mo maximum) : découpez-le par matière.'] });
+    setText(await file.text());
+    setResult(null);
+  }
+
+  // Erreurs renvoyées par le serveur : tableau `errors` (validation du contenu)
+  const errors = result && !result.ok ? result.errors || [result.error] : [];
+
+  return (
+    <div className="card">
+      <h2>Importer un référentiel (JSON)</h2>
+      <p className="small muted">
+        Format décrit dans <code>docs/import-format.md</code> du dépôt (avec une consigne prête à coller dans NotebookLM) ;
+        modèle : <code>docs/modele-import.json</code>. Importez de préférence une matière ou un chapitre à la fois.
+      </p>
+      <div className="field">
+        <label htmlFor="imp-file">Fichier JSON</label>
+        <input id="imp-file" type="file" accept=".json,application/json" onChange={(e) => loadFile(e.target.files?.[0])} />
+      </div>
+      <div className="field">
+        <label htmlFor="imp-text">… ou collez le JSON (par exemple la réponse de NotebookLM)</label>
+        <textarea id="imp-text" rows={12} style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.85rem' }} value={text} onChange={(e) => { setText(e.target.value); setResult(null); }} placeholder='{"subjects": [ … ], "questions": [ … ] }' />
+      </div>
+      <fieldset>
+        <legend>Mode d’import</legend>
+        <label className="row"><input type="radio" name="imp-mode" checked={mode === 'ajouter'} onChange={() => setMode('ajouter')} /> <span><strong>Ajouter</strong> au contenu existant (une matière au même code est complétée)</span></label>
+        <label className="row mt"><input type="radio" name="imp-mode" checked={mode === 'remplacer'} onChange={() => setMode('remplacer')} /> <span><strong>Remplacer</strong> tout le contenu (supprime aussi la démonstration et la progression des étudiants)</span></label>
+        {mode === 'remplacer' && (
+          <div className="field mt" style={{ maxWidth: 320 }}>
+            <label htmlFor="imp-confirm">Tapez REMPLACER pour confirmer</label>
+            <input id="imp-confirm" type="text" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+          </div>
+        )}
+      </fieldset>
+      <label className="row mb"><input type="checkbox" checked={isDemo} onChange={(e) => setIsDemo(e.target.checked)} /> <span>Marquer ce contenu comme « démonstration » (non encore validé par un enseignant)</span></label>
+
+      {errors.length > 0 && (
+        <div className="alert alert-error" role="alert">
+          <strong>Le contenu n’a pas été importé :</strong>
+          <ul className="small" style={{ margin: '6px 0 0' }}>{errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
+        </div>
+      )}
+      {result?.ok && (
+        <div className={`alert ${result.imported ? 'alert-success' : 'alert-info'}`} role="status">
+          <strong>{result.imported ? 'Import réussi.' : 'Fichier valide — rien n’a encore été importé.'}</strong>
+          <div className="row small mt">
+            {Object.entries(result.summary).map(([k, v]) => <span key={k} className="badge">{SUMMARY_LABELS[k] || k} : {v}</span>)}
+          </div>
+        </div>
+      )}
+      <div className="row">
+        <button className="btn btn-ghost" disabled={busy || !text.trim()} onClick={() => submit('verifier')}>Vérifier</button>
+        <button className="btn btn-accent" disabled={busy || !text.trim() || (mode === 'remplacer' && confirmText !== 'REMPLACER')} onClick={() => submit(mode)}>
+          {busy ? 'Import…' : mode === 'remplacer' ? 'Remplacer le contenu' : 'Importer'}
+        </button>
+      </div>
+    </div>
   );
 }

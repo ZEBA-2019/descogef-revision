@@ -32,7 +32,7 @@ export async function api(path, { method = 'GET', body, signal } = {}) {
   }
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/auth/')) onUnauthorized();
-    throw new ApiError(res.status, data?.error || 'Une erreur est survenue.', data?.details);
+    throw new ApiError(res.status, data?.error || 'Une erreur est survenue.', data?.details || data?.errors?.map((message) => ({ message })));
   }
   return data;
 }

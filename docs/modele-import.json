@@ -1,0 +1,60 @@
+{
+  "subjects": [
+    {
+      "code": "CF",
+      "title": "Comptabilité financière approfondie",
+      "description": "Référentiel SYSCOHADA révisé.",
+      "chapters": [
+        { "key": "cf-immo", "title": "Immobilisations et amortissements", "description": "Coût d'entrée, durée d'utilité, cession." }
+      ]
+    }
+  ],
+  "lessons": [
+    { "chapter": "cf-immo", "title": "Comptabiliser une immobilisation", "content": "Texte du cours…" }
+  ],
+  "sheets": [
+    {
+      "chapter": "cf-immo",
+      "title": "Amortissement linéaire",
+      "summary": "Calculer la dotation annuelle.",
+      "sections": [
+        { "kind": "definition", "title": "Durée d'utilité", "body": "Période pendant laquelle l'entité prévoit d'utiliser l'actif." },
+        { "kind": "formule", "title": "Dotation", "body": "Base amortissable ÷ durée d'utilité × (mois ÷ 12)" },
+        { "kind": "exemple", "title": "Exemple", "body": "12 000 000 ÷ 5 × 9/12 = 1 800 000" },
+        { "kind": "erreur", "title": "Erreurs fréquentes", "body": "Oublier le prorata temporis." }
+      ],
+      "refs": ["AUDCIF, article … (à préciser)"]
+    }
+  ],
+  "questions": [
+    {
+      "chapter": "cf-immo", "type": "mcq", "difficulty": 1, "competency": "Amortissement", "diagnostic": true,
+      "prompt": "Un terrain nu est-il amortissable ?",
+      "choices": [
+        { "label": "Non, sauf cas particuliers (gisements…)", "correct": true },
+        { "label": "Oui, sur 20 ans", "feedback": "Un terrain ne se déprécie pas par l'usage." }
+      ],
+      "explanation": "Un terrain n'est pas amorti, sauf terrains de gisement."
+    },
+    { "chapter": "cf-immo", "type": "truefalse", "prompt": "L'amortissement commence à la mise en service.", "answer": { "value": true }, "explanation": "Prorata temporis à partir de la mise en service." },
+    { "chapter": "cf-immo", "type": "short", "prompt": "Comment appelle-t-on la période d'utilisation prévue d'un actif ?", "answer": { "accepted": ["Durée d'utilité"] }, "explanation": "…" },
+    { "chapter": "cf-immo", "type": "calc", "difficulty": 2, "prompt": "Bien de 12 000 000, 5 ans, mis en service le 1er avril. Dotation N ?", "answer": { "value": 1800000, "tolerance": 1, "unit": "FCFA" }, "explanation": "2 400 000 × 9/12." },
+    { "chapter": "cf-immo", "type": "match", "prompt": "Associez chaque classe à son contenu.", "answer": { "left": ["Classe 2", "Classe 5"], "right": ["Trésorerie", "Actif immobilisé"], "pairs": [[0, 1], [1, 0]] }, "explanation": "…" }
+  ],
+  "exercises": [
+    {
+      "chapter": "cf-immo", "kind": "cas", "title": "Cession d'un matériel", "duration_min": 30, "difficulty": 2,
+      "statement": "Énoncé du cas…",
+      "annexes": [ { "title": "Annexe 1", "table": { "head": ["Élément", "Montant"], "rows": [["Coût d'entrée", "10 000 000"]] } } ],
+      "items": [
+        { "prompt": "Calculez la VCN.", "hints": ["VCN = coût − amortissements cumulés"], "solution": "Corrigé détaillé…", "points": 5, "criteria": ["Formule (2 pts)", "Résultat (3 pts)"] }
+      ]
+    }
+  ],
+  "flashcards": [
+    { "chapter": "cf-immo", "front": "Formule de la VCN", "back": "Coût d'entrée − amortissements cumulés" }
+  ],
+  "exams": [
+    { "title": "Examen blanc n°1", "description": "4 questions par matière.", "duration_min": 30, "config": { "perSubject": 4, "difficultyMix": { "1": 2, "2": 1, "3": 1 } } }
+  ]
+}

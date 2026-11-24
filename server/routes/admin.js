@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { all, one, run, tx, parseJson } from '../db.js';
 import { handler, validate, HttpError, toId } from '../http.js';
 import { requireAdmin } from '../auth.js';
+import { validateContent, summarizeContent, insertContent, clearContent } from '../content-loader.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -191,6 +192,32 @@ async function saveChoices(questionId, choices) {
     await run('INSERT INTO choices (question_id, label, is_correct, feedback, position) VALUES (?, ?, ?, ?, ?)', questionId, c.label, c.is_correct ? 1 : 0, c.feedback, i);
   }
 }
+
+/**
+ * Import d'un référentiel au format JSON (docs/import-format.md).
+ * mode « verifier » : validation seule ; « ajouter » : complète l'existant ; « remplacer » : supprime tout le contenu
+ * pédagogique (et la progression des étudiants qui en dépend) avant d'importer.
+ */
+router.post('/import', handler(async (req, res) => {
+  const { mode, isDemo, content: raw } = validate(
+    z.object({
+      mode: z.enum(['verifier', 'ajouter', 'remplacer']),
+      isDemo: z.boolean().default(false),
+      content: z.any(),
+      confirm: z.string().optional(),
+    }).refine((b) => b.mode !== 'remplacer' || b.confirm === 'REMPLACER', { message: 'Pour remplacer, saisissez REMPLACER pour confirmer.' }),
+    req.body
+  );
+  const result = validateContent(raw);
+  if (!result.ok) return res.status(400).json({ error: 'Le fichier contient des erreurs.', errors: result.errors });
+  const summary = summarizeContent(result.content);
+  if (mode === 'verifier') return res.json({ ok: true, imported: false, summary });
+  await tx(async () => {
+    if (mode === 'remplacer') await clearContent();
+    await insertContent(result.content, { isDemo });
+  });
+  res.status(201).json({ ok: true, imported: true, mode, summary });
+}));
 
 router.get('/overview', handler(async (_req, res) => {
   const counts = {};
